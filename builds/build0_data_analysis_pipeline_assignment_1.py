@@ -161,7 +161,7 @@ def multiple_linear_regression(
     
     # Check outcome is numeric
     if df[outcome].dtype.kind not in 'if':
-        raise ValueError(f"Outcome column '{outcome}' must be numeric.")
+        raise ValueError(f"Outcome must be numeric for linear regression: {outcome}")
     
     # If predictors is None, use all numeric columns except outcome
     if predictors is None:

@@ -1,30 +1,87 @@
-# AI Data Analysis
+# QAC387 AI Data Analysis Pipeline
 
-Coursework and projects for AI Data Analysis class.
+Data analysis pipeline and interactive LLM assistant for QAC387.
 
 ## Repository Structure
 
 ```
-AIclass/
-├── README.md
-└── (projects and assignments to be added)
+.
+├── builds/
+│   ├── build0_data_analysis_pipeline_assignment_1.py   # Build 0: Data analysis pipeline
+│   └── build1_llm_assistant_Assignment_2.py            # Build 1: Interactive LLM assistant
+├── src/                          # Refactored modules from Build 0
+│   ├── __init__.py               # Re-exports all functions
+│   ├── utilities.py              # File I/O and directory helpers
+│   ├── profiling.py              # Dataset profiling and column splitting
+│   ├── summaries.py              # Numeric and categorical summaries
+│   ├── analysis.py               # Missingness, regression, correlations
+│   ├── plots.py                  # Visualization functions
+│   └── checks.py                 # JSON validation and target checks
+├── data/
+│   └── penguins.csv              # Palmer Penguins dataset
+├── test_models.py                # Module import and functionality tests
+├── requirements.txt
+├── .env.example                  # Template for API key configuration
+└── ASSIGNMENT_README.md          # Original Build 0 assignment instructions
 ```
 
 ## Setup
 
-*Prerequisites and setup instructions will be added as needed.*
+1. Clone the repository and create a virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate        # macOS/Linux
+   .venv\Scripts\activate           # Windows
+   ```
 
-## Assignments
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-| Assignment | Description | Status |
-|------------|-------------|--------|
-| - | - | - |
+3. Configure your OpenAI API key:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your OPENAI_API_KEY
+   ```
 
-## Technologies
+4. Verify modules work:
+   ```bash
+   python test_models.py
+   ```
 
-- Python
-- (Additional tools/libraries TBD)
+## Build 0: Data Analysis Pipeline
 
-## Notes
+Automated pipeline that loads a CSV dataset, generates profiling reports, summary statistics, correlation analysis, regression output, and visualizations.
 
-Class notes and resources will be documented here as the course progresses.
+```bash
+python builds/build0_data_analysis_pipeline_assignment_1.py --data data/penguins.csv
+```
+
+## Build 1: Interactive LLM Assistant
+
+Interactive CLI assistant powered by LangChain LCEL that answers questions about dataset schema. Supports three modes:
+
+**Run 1 — No memory:**
+```bash
+python builds/build1_llm_assistant_Assignment_2.py --data data/penguins.csv
+```
+
+**Run 2 — With memory** (retains conversation context):
+```bash
+python builds/build1_llm_assistant_Assignment_2.py --data data/penguins.csv --memory
+```
+
+**Run 3 — Memory + streaming** (streams responses token-by-token):
+```bash
+python builds/build1_llm_assistant_Assignment_2.py --data data/penguins.csv --memory --stream
+```
+
+### Additional flags
+
+| Flag | Description |
+|------|-------------|
+| `--model` | LLM model name (default: `gpt-4o-mini`) |
+| `--temperature` | Sampling temperature (default: `0.2`) |
+| `--quiet_schema` | Suppress schema display at startup |
+| `--report_dir` | Output directory (default: `reports`) |

@@ -1,247 +1,331 @@
 """
-Build 1: Refactoring Functions and Simple LLM Assistant (Assignment 2)
+Build1: This build creates a simple LLM assistant using LangChain's LCEL framework
+and imports build0 functions to load data and perform basic data set profiling.
 
-This script refactors Build 0 functions into separate modules (src/)
-and adds two LLM API calls:
-  1) Summarize the dataset column names and data types
-  2) Suggest research questions based on the columns and data types
+TASK:
+Your job is to fill in the blanks to create a working interactive command-line assistant
+that can answer questions about the dataset schema. Then, you will run the script 3 times in different modes
+(no memory, memory, streaming). At each step, you should test the assistant by asking questions about the
+dataset and observing how it responds. Make sure to try follow-up questions in memory mode to make sure
+it retains context across interactions.
 
-Completed by Holt Young
+In order to complete the assignment, you will need to:
+1) Download the build1_llm_assistant_assignment_2.py and the requirements.txt,
+run the requirements.txt file to install the necessary libraries into your local
+project virtual environment.
+
+2) Make sure you have split your Build0 code into reusable functions into a folder in the project root directory
+(e.g., src/) and that you have run the test_modles.py file to confirm they work.
+
+3) Complete the assignment by filling in the blanks (marked with TODO) in the
+build1_llm_assistant_assignment_2.py file. The main areas you need to complete are:
+
+3a) Write your own SYSTEM_PROMPT that defines the assistant's role, what it can see (only the dataset schema), and how it should format its responses.
+3b) Complete the profile_to_schema_text function to convert the output of basic_profile() into a string format that can be included in the prompt.
+3c) Fill in the blanks in the build_chain function to create either a memory-enabled or non-memory chain based on the arguments.
+3d) Complete the argparse section in the main() function to correctly parse command-line arguments for data path, report directory, model choice,
+temperature, and flags for quiet schema, memory, and streaming.
+
+4) After completing the code, run the script 3 times with different combinations of
+the --memory and --stream flags to see how the assistant behaves in each mode.
+Test it by asking questions about the dataset schema and observing the responses.
+Note any issues you encounter in each mode (e.g., hallucinations, incorrect answers,
+failure to follow instructions), how it handles follow-up questions in memory mode
+and how the output is displayed in streaming mode. Describe any edits you made to the system prompt
+or other parts of the code to improve the assistant's performance based on your observations.
+
+5) Take screenshots of the assistant in action for each mode and paste them into a document.
+Include the link to your GitHub repo at the top of the document and upload it to Moodle.
+
+6) Commit and Push your changes to your GitHub repository.
+
+Before submitting, make sure that your code executes correctly and that the streaming and
+memory modes work as expected.
+
+HOW TO RUN THE SCRIPT:
+1) Make sure you have your environment activated and set up with the necessary libraries. There are new
+libraries so run the requirements.txt file to install them.
+
+2) Run the script with the --data argument pointing to your CSV file.
+
+3) Run it 3 times to see the differences between no memory, memory, and streaming modes:
+
+Run 1 (no memory):
+python builds/build1_llm_assistant_assignment_2.py --data data/penguins.csv
+
+This will start an interactive command-line interface where you can ask questions about the dataset.
+
+Run 2 (with memory): run it again with the --memory flag to enable conversation memory:
+
+python builds/build1_llm_assistant_assignment_2.py --data data/penguins.csv --memory
+
+This allows the assistant to remember previous interactions in the same session,
+which can lead to more coherent and context-aware responses. Try asking follow-up questions that
+reference previous answers to ensure that memory is working as expected.
+
+Run 3 (with streaming): you can also enable streaming output to see the model's response as it is generated:
+
+python builds/build1_llm_assistant_assignment_2.py --data data/penguins.csv --memory --stream
 """
 
+# This import allows us to use modern Python type hints which helps developers understand
+# what types of data are expected)
+# (e.g., list[str]), which can be used in function annotations even if the function is defined in a string.
 from __future__ import annotations
 
 import argparse
-import json
-import os
 from pathlib import Path
-from typing import Optional, List
-
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-
-# Import refactored modules from src/
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from dotenv import load_dotenv
 
-from src.utilities import ensure_dirs, read_data
-from src.profiling import basic_profile, split_columns
-from src.summaries import summarize_numeric, summarize_categorical
-from src.analysis import missingness_table, multiple_linear_regression, correlations
-from src.plots import (
-    plot_missingness,
-    plot_corr_heatmap,
-    plot_histograms,
-    plot_bar_charts,
-)
-from src.checks import assert_json_safe, target_check
+# LangChain / OpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
 
-
-# -----------------------------
-# LLM Assistant Functions
-# -----------------------------
+# import reusable functions from build0 (defined in src/__init__.py)
+# These are just examples of functions you might have defined in build0 Adjust as needed.
+# Add project root to Python path so it can find the src folder
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from src import ensure_dirs, read_data, basic_profile
 
 
-def get_llm() -> ChatOpenAI:
-    """Initialize the OpenAI LLM via LangChain."""
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "OPENAI_API_KEY not found. "
-            "Make sure you have a .env file with your API key."
+# -------------------------------------------------------------------------------------------------
+# SYSTEM PROMPT
+# -------------------------------------------------------------------------------------------------
+# Defines the assistant's role, what it can see (only the dataset schema),
+# instructs it not to invent columns, and specifies output format.
+SYSTEM_PROMPT = """You are a data analysis assistant helping students explore and understand datasets.
+
+You can ONLY see the dataset schema (column names and data types) provided in the conversation.
+You do NOT have access to the actual data values, only the structure.
+
+Rules:
+- NEVER invent or hallucinate column names that are not in the provided schema.
+- If you are unsure about something, say so rather than guessing.
+- Base all suggestions on the columns and data types actually present in the schema.
+
+When responding, format your answers as follows:
+- Suggest specific research questions using the actual column names from the schema.
+- For each research question, identify the relevant variables (outcome vs predictors).
+- Recommend an appropriate analysis approach (e.g., regression, group comparison, correlation).
+- Ask clarifying questions if the user's request is ambiguous.
+"""
+
+
+# -------------------------------------------------------------------------------------------------
+# Helper (supporting functions that are not part of the LCEL chain
+# that help with formatting and other tasks)
+# -------------------------------------------------------------------------------------------------
+
+
+def profile_to_schema_text(profile: dict) -> str:
+    """
+    Convert basic_profile() output into a compact prompt-ready string.
+    """
+
+    lines = [
+        f"Rows: {profile.get('n_rows')}",
+        f"Columns: {profile.get('n_cols')}",
+        "",
+        "Columns and dtypes:",
+    ]
+    for col in profile["columns"]:
+        lines.append(f"- {col}: {profile['dtypes'].get(col)}")
+
+    return "\n".join(lines)
+
+
+# funtion to build the LCEL chain, with optional streaming and memory support.
+def build_chain(
+    model: str = "gpt-4o-mini",
+    temperature: float = 0.2,
+    stream: bool = False,
+    memory: bool = False,
+):
+    """
+    Returns either:
+      - a normal LCEL chain (no memory), OR
+      - a RunnableWithMessageHistory (memory-enabled chain)
+    """
+    llm = ChatOpenAI(model=model, temperature=temperature, streaming=stream)
+
+    if memory:
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", SYSTEM_PROMPT),
+                ("human", "Dataset schema:\n{schema_text}"),
+                MessagesPlaceholder(variable_name="history"),
+                ("human", "User question:\n{user_query}"),
+            ]
         )
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.7,
-        openai_api_key=api_key,
+
+        base_chain = prompt | llm | StrOutputParser()
+
+        history = InMemoryChatMessageHistory()
+        chain_with_history = RunnableWithMessageHistory(
+            base_chain,
+            lambda session_id: history,
+            input_messages_key="user_query",
+            history_messages_key="history",
+        )
+        return chain_with_history
+
+    # No memory: simpler prompt
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", SYSTEM_PROMPT),
+            (
+                "human",
+                "Dataset schema:\n{schema_text}\n\nUser question:\n{user_query}\n",
+            ),
+        ]
     )
-    return llm
+
+    base_chain = prompt | llm | StrOutputParser()
+    return base_chain
 
 
-def summarize_columns(llm: ChatOpenAI, profile: dict) -> str:
-    """
-    Ask the LLM to summarize the dataset column names and data types.
+# help text for user commands and example prompts.
+# This is just a simple string, but it could be expanded into a more complex
+# help system if desired.
+HELP_TEXT = """Commands:
+  help     - show example prompts
+  schema   - show the dataset schema
+  exit     - quit the program
 
-    Args:
-        llm: The LangChain ChatOpenAI instance
-        profile: The data profile dictionary from basic_profile()
+Example prompts:
+  - What research questions could I ask with this dataset?
+  - What are strong candidate outcomes vs predictors?
+  - Suggest group comparison questions.
+  - Suggest regression-style questions.
+  - What variables might act as confounders?
 
-    Returns:
-        A string summary from the LLM
-    """
-    columns_info = ""
-    for col_name, dtype in profile["dtypes"].items():
-        columns_info += f"  - {col_name}: {dtype}\n"
-
-    messages = [
-        SystemMessage(
-            content=(
-                "You are a helpful data analysis assistant. "
-                "Given a dataset's column names and data types, "
-                "provide a clear and concise summary of the dataset structure. "
-                "Describe what each column likely represents and how the "
-                "data types relate to the kind of analysis that could be done."
-            )
-        ),
-        HumanMessage(
-            content=(
-                f"Here is a dataset with {profile['n_rows']} rows "
-                f"and {profile['n_cols']} columns.\n\n"
-                f"Column names and data types:\n{columns_info}\n"
-                f"Total missing values: {profile['n_missing_total']}\n\n"
-                "Please summarize this dataset's structure and what each "
-                "column likely represents."
-            )
-        ),
-    ]
-
-    response = llm.invoke(messages)
-    return response.content
-
-
-def suggest_research_questions(llm: ChatOpenAI, profile: dict) -> str:
-    """
-    Ask the LLM to suggest research questions based on the column names
-    and data types.
-
-    Args:
-        llm: The LangChain ChatOpenAI instance
-        profile: The data profile dictionary from basic_profile()
-
-    Returns:
-        A string with suggested research questions from the LLM
-    """
-    columns_info = ""
-    for col_name, dtype in profile["dtypes"].items():
-        columns_info += f"  - {col_name}: {dtype}\n"
-
-    messages = [
-        SystemMessage(
-            content=(
-                "You are a helpful data analysis assistant. "
-                "Given a dataset's column names and data types, "
-                "suggest meaningful research questions that could be "
-                "addressed using this data. Consider relationships between "
-                "variables, group comparisons, and predictive modeling."
-            )
-        ),
-        HumanMessage(
-            content=(
-                f"Here is a dataset with {profile['n_rows']} rows "
-                f"and {profile['n_cols']} columns.\n\n"
-                f"Column names and data types:\n{columns_info}\n"
-                f"Total missing values: {profile['n_missing_total']}\n\n"
-                "Please suggest 5 research questions that could be "
-                "explored with this dataset."
-            )
-        ),
-    ]
-
-    response = llm.invoke(messages)
-    return response.content
-
-
-# -----------------------------
-# Main pipeline
-# -----------------------------
+"""
 
 
 def main():
+    """
+    This function defines the entry point of the script.
+
+    In larger AI or data analysis projects, files often serve two roles:
+    1) As reusable modules (imported by other files)
+    2) As runnable scripts (executed directly)
+
+    Wrapping execution logic inside `main()` allows this file to act
+    as a clean, reusable component in an agentic system while still
+    supporting direct execution for testing and demos.
+
+    The `if __name__ == "__main__":` guard ensures that this code runs
+    only when explicitly intended, which becomes critical as systems
+    grow more modular and interconnected.
+    """
+
+    load_dotenv()
+
+    # ---------------------------------------------------------------------------------------------
+    # argparse: parse command-line arguments
+    # ---------------------------------------------------------------------------------------------
     parser = argparse.ArgumentParser(
-        description="Build 1: Data Analysis Pipeline with LLM Assistant"
+        description="Build1 LLM Assistant (Interactive CLI)"
     )
-    parser.add_argument("--data", type=str, required=True, help="Path to CSV file")
-    parser.add_argument("--target", type=str, default=None, help="Target column")
+
     parser.add_argument(
-        "--outcome", type=str, default=None, help="Outcome for regression"
-    )
-    parser.add_argument(
-        "--predictors",
+        "--data",
         type=str,
-        default=None,
-        help="Comma-separated predictors for regression",
+        required=True,
+        help="Path to CSV file",
+    )
+    parser.add_argument("--report_dir", type=str, default="reports")
+    parser.add_argument("--model", type=str, default="gpt-4o-mini")
+    parser.add_argument("--temperature", type=float, default=0.2)
+
+    parser.add_argument(
+        "--quiet_schema",
+        action="store_true",
+        help="Do not print schema automatically at startup",
     )
     parser.add_argument(
-        "--report_dir", type=str, default="reports", help="Output directory"
+        "--memory",
+        action="store_true",
+        help="Enable conversation memory for this session",
     )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream model output to terminal as it is generated",
+    )
+
     args = parser.parse_args()
 
-    report_dir = Path(args.report_dir)
-    ensure_dirs(report_dir)
+    data_path = Path(args.data)
+    reports = Path(args.report_dir)
 
-    # --- Data Loading and Profiling ---
-    print("Loading data...")
-    df = read_data(Path(args.data))
-    numeric_cols, cat_cols = split_columns(df)
-
-    print("Profiling data...")
+    ensure_dirs(reports)
+    df = read_data(data_path)
     profile = basic_profile(df)
-    miss_df = missingness_table(df)
-    num_summary = summarize_numeric(df, numeric_cols)
-    cat_summary = summarize_categorical(df, cat_cols)
-    corr = correlations(df, numeric_cols)
+    schema_text = profile_to_schema_text(profile)
 
-    # --- Save Reports ---
-    print("Saving reports...")
-    (report_dir / "data_profile.json").write_text(json.dumps(profile, indent=2))
-    miss_df.to_csv(report_dir / "missingness_by_column.csv", index=False)
-    num_summary.to_csv(report_dir / "summary_numeric.csv", index=False)
-    cat_summary.to_csv(report_dir / "summary_categorical.csv", index=False)
+    print("\n=== BUILD1 LLM ASSISTANT ===\n")
 
-    if not corr.empty:
-        corr.to_csv(report_dir / "correlations.csv")
+    if not args.quiet_schema:
+        print("=== DATASET SCHEMA ===")
+        print(schema_text)
 
-    # --- Generate Plots ---
-    print("Generating plots...")
-    plot_missingness(miss_df, report_dir / "figures" / "missingness.png")
-    plot_corr_heatmap(corr, report_dir / "figures" / "corr_heatmap.png")
-    plot_histograms(df, numeric_cols, report_dir / "figures")
-    plot_bar_charts(df, cat_cols, report_dir / "figures")
+    print("\nType 'help' for commands. Type 'exit' to quit.\n")
 
-    # --- Target Check ---
-    if args.target:
-        target_info = target_check(df, args.target)
-        (report_dir / "target_overview.json").write_text(
-            json.dumps(target_info, indent=2)
+    chain = build_chain(
+        model=args.model,
+        temperature=args.temperature,
+        stream=args.stream,
+        memory=args.memory,
+    )
+
+    while True:
+        user_query = input("> ").strip()
+
+        if not user_query:
+            continue
+
+        cmd = user_query.lower()
+
+        if cmd in {"exit", "quit"}:
+            print("Goodbye!")
+            break
+
+        if cmd == "help":
+            print("\n" + HELP_TEXT + "\n")
+            continue
+
+        if cmd == "schema":
+            print("\n=== DATASET SCHEMA ===")
+            print(schema_text + "\n")
+            continue
+        # Streaming vs non-streaming response handling. If streaming is enabled,
+        # we print chunks as they come in.
+        inputs = {"schema_text": schema_text, "user_query": user_query}
+        config = (
+            {"configurable": {"session_id": "cli-session"}} if args.memory else None
         )
 
-    # --- Regression ---
-    if args.outcome:
-        preds: Optional[List[str]] = None
-        if args.predictors:
-            preds = [p.strip() for p in args.predictors.split(",") if p.strip()]
-
-        reg_results = multiple_linear_regression(
-            df, outcome=args.outcome, predictors=preds
-        )
-        assert_json_safe(reg_results, context="multiple_linear_regression output")
-        (report_dir / "regression_results.json").write_text(
-            json.dumps(reg_results, indent=2)
-        )
-
-    # --- LLM Assistant ---
-    print("\nInitializing LLM assistant...")
-    llm = get_llm()
-
-    print("Asking LLM to summarize dataset columns and data types...")
-    column_summary = summarize_columns(llm, profile)
-    print("\n--- LLM Column Summary ---")
-    print(column_summary)
-
-    # Save the column summary
-    (report_dir / "llm_column_summary.txt").write_text(column_summary)
-
-    print("\nAsking LLM to suggest research questions...")
-    research_questions = suggest_research_questions(llm, profile)
-    print("\n--- LLM Research Questions ---")
-    print(research_questions)
-
-    # Save the research questions
-    (report_dir / "llm_research_questions.txt").write_text(research_questions)
-
-    print(f"\nBuild 1 pipeline complete. Outputs saved to: {report_dir.resolve()}")
+        if args.stream:
+            print()
+            if config:
+                for chunk in chain.stream(inputs, config=config):
+                    print(chunk, end="", flush=True)
+                print("\n")
+            else:
+                for chunk in chain.stream(inputs):
+                    print(chunk, end="", flush=True)
+                print("\n")
+        else:
+            if config:
+                response = chain.invoke(inputs, config=config)
+            else:
+                response = chain.invoke(inputs)
+            print("\n" + response + "\n")
 
 
 if __name__ == "__main__":

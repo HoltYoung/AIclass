@@ -1,5 +1,6 @@
 # Environment variables
 .env
+env
 .env.local
 .env.*.local
 
@@ -19,6 +20,7 @@ env/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # OS
 .DS_Store

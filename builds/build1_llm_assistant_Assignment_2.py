@@ -74,6 +74,7 @@ python builds/build1_llm_assistant_assignment_2.py --data data/penguins.csv --me
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 from dotenv import load_dotenv
@@ -150,7 +151,13 @@ def build_chain(
       - a normal LCEL chain (no memory), OR
       - a RunnableWithMessageHistory (memory-enabled chain)
     """
-    llm = ChatOpenAI(model=model, temperature=temperature, streaming=stream)
+    base_url = os.getenv("OPENAI_API_BASE")
+    llm = ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        streaming=stream,
+        **({"base_url": base_url} if base_url else {}),
+    )
 
     if memory:
         prompt = ChatPromptTemplate.from_messages(
@@ -239,7 +246,7 @@ def main():
         help="Path to CSV file",
     )
     parser.add_argument("--report_dir", type=str, default="reports")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini")
+    parser.add_argument("--model", type=str, default="claude-opus-4-6")
     parser.add_argument("--temperature", type=float, default=0.2)
 
     parser.add_argument(

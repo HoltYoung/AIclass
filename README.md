@@ -39,10 +39,10 @@ Data analysis pipeline and interactive LLM assistant for QAC387.
    pip install -r requirements.txt
    ```
 
-3. Configure your OpenAI API key:
+3. Configure your API key:
    ```bash
    cp .env.example .env
-   # Edit .env and add your OPENAI_API_KEY
+   # Edit .env and add your API key and base URL
    ```
 
 4. Verify modules work:
@@ -60,7 +60,7 @@ python builds/build0_data_analysis_pipeline_assignment_1.py --data data/penguins
 
 ## Build 1: Interactive LLM Assistant
 
-Interactive CLI assistant powered by LangChain LCEL that answers questions about dataset schema. Supports three modes:
+Interactive CLI assistant powered by LangChain LCEL that answers questions about dataset schema. Uses Claude (Anthropic) as the LLM backend via an OpenAI-compatible proxy. Supports three modes:
 
 **Run 1 — No memory:**
 ```bash
@@ -81,7 +81,7 @@ python builds/build1_llm_assistant_Assignment_2.py --data data/penguins.csv --me
 
 | Flag | Description |
 |------|-------------|
-| `--model` | LLM model name (default: `gpt-4o-mini`) |
+| `--model` | LLM model name (default: `claude-opus-4-6`) |
 | `--temperature` | Sampling temperature (default: `0.2`) |
 | `--quiet_schema` | Suppress schema display at startup |
 | `--report_dir` | Output directory (default: `reports`) |
